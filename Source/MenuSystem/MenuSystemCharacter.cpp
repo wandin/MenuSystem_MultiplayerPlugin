@@ -127,7 +127,7 @@ void AMenuSystemCharacter::CreateGameSession()
 
 	// create a local variable Session Settings of type FOnlineSessionSettings, from the SessionSettings library, MakeShareable will wrap this in a TSharedptr
 	TSharedPtr<FOnlineSessionSettings> SessionSettings = MakeShareable(new FOnlineSessionSettings());
-	SessionSettings->bIsLANMatch = true;
+	SessionSettings->bIsLANMatch = false;
 	SessionSettings->NumPublicConnections = 4;
 	SessionSettings->bAllowJoinInProgress = true;
 	SessionSettings->bAllowJoinViaPresence = true;
