@@ -4,7 +4,11 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+
+#include "Interfaces/OnlineSessionInterface.h"
+
 #include "MenuSystemCharacter.generated.h"
+
 
 UCLASS(config=Game)
 class AMenuSystemCharacter : public ACharacter
@@ -67,7 +71,29 @@ public:
 public:
 
 	// pointer to the online Session interface
-	TSharedPtr<class IOnlineSession, ESPMode::ThreadSafe> OnlineSessionInterface;
+	IOnlineSessionPtr OnlineSessionInterface;
+
+protected:
+
+	UFUNCTION(BlueprintCallable)
+	void CreateGameSession();
+
+	void OnCreateGameSessionComplete(FName SessionName, bool bWasSuccessful);
+
+	UFUNCTION(BlueprintCallable)
+	void JoinGameSession();
+
+	void OnFindSessionComplete(bool bWasSuccessful);
+
+	void OnJoinSessionComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result);
+
+private:
+
+	FOnCreateSessionCompleteDelegate CreateSessionCompleteDelegate;
+	FOnFindSessionsCompleteDelegate FindSessionCompleteDelegate;
+	FOnJoinSessionCompleteDelegate JoinSessionCompleteDelegate;
+
+	TSharedPtr<FOnlineSessionSearch> SessionSearch;
 
 };
 

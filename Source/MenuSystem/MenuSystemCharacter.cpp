@@ -9,14 +9,18 @@
 #include "GameFramework/SpringArmComponent.h"
 
 #include "OnlineSubsystem.h"
-#include "Interfaces/OnlineSessionInterface.h"
+#include "OnlineSessionSettings.h"
+
 
 
 
 //////////////////////////////////////////////////////////////////////////
 // AMenuSystemCharacter
 
-AMenuSystemCharacter::AMenuSystemCharacter()
+AMenuSystemCharacter::AMenuSystemCharacter() : 
+	CreateSessionCompleteDelegate(FOnCreateSessionCompleteDelegate::CreateUObject(this, &ThisClass::OnCreateGameSessionComplete)),
+	FindSessionCompleteDelegate(FOnFindSessionsCompleteDelegate::CreateUObject(this, &ThisClass::OnFindSessionComplete)),
+	JoinSessionCompleteDelegate(FOnJoinSessionCompleteDelegate::CreateUObject(this, &ThisClass::OnJoinSessionComplete))
 {
 	// Set size for collision capsule
 	GetCapsuleComponent()->InitCapsuleSize(42.f, 96.0f);
@@ -97,6 +101,179 @@ void AMenuSystemCharacter::SetupPlayerInputComponent(class UInputComponent* Play
 	// handle touch devices
 	PlayerInputComponent->BindTouch(IE_Pressed, this, &AMenuSystemCharacter::TouchStarted);
 	PlayerInputComponent->BindTouch(IE_Released, this, &AMenuSystemCharacter::TouchStopped);
+}
+
+void AMenuSystemCharacter::CreateGameSession()
+{
+	// called when pressed the 1 key
+
+	// if Session INterface is not valid, return
+	if (!OnlineSessionInterface.IsValid())
+	{
+		return;
+	}
+
+	// if SessionInterface is valid, get the Session name and store to ExistingSession
+	auto ExistingSession = OnlineSessionInterface->GetNamedSession(NAME_GameSession);
+
+	// if Existing Session is not nullptr, we can destroy, because obviously there's a Session.
+	if (ExistingSession != nullptr)
+	{
+		OnlineSessionInterface->DestroySession(NAME_GameSession);
+	}
+
+	// adding the Delegate function to our OnlineSessionINterface, in order to respond to our CreateSession 
+	OnlineSessionInterface->AddOnCreateSessionCompleteDelegate_Handle(CreateSessionCompleteDelegate);
+
+	// create a local variable Session Settings of type FOnlineSessionSettings, from the SessionSettings library, MakeShareable will wrap this in a TSharedptr
+	TSharedPtr<FOnlineSessionSettings> SessionSettings = MakeShareable(new FOnlineSessionSettings());
+	SessionSettings->bIsLANMatch = true;
+	SessionSettings->NumPublicConnections = 4;
+	SessionSettings->bAllowJoinInProgress = true;
+	SessionSettings->bAllowJoinViaPresence = true;
+	SessionSettings->bShouldAdvertise = true;
+	SessionSettings->bUsesPresence = true;
+	SessionSettings->bUseLobbiesIfAvailable = true;
+
+	SessionSettings->Set(FName("MatchType"), FString("FreeforAll"), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+
+	// Get a UniqueNetId to use in the CreateSessionfunction below
+	const ULocalPlayer* LocalPlayer = GetWorld()->GetFirstLocalPlayerFromController();
+	// the dereference FUniqueNetId operator returns a reference to FUniqueNetId, so we need to include the asterisc to dereference it. (*LocalPlayer->GetPreferredUniqueNetId()...)
+	// the same for *SessionSettings
+	OnlineSessionInterface->CreateSession(*LocalPlayer->GetPreferredUniqueNetId(), NAME_GameSession, *SessionSettings);
+
+
+}
+
+void AMenuSystemCharacter::OnCreateGameSessionComplete(FName SessionName, bool bWasSuccessful)
+{
+	if (bWasSuccessful)
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(
+				-1,
+				15.0f,
+				FColor::Green,
+				FString::Printf(TEXT("Created Session: %s"), *SessionName.ToString())
+			);
+		}
+
+		UWorld* World = GetWorld();
+		if (World)
+		{
+			// travel to lobby level and open as LISTEN
+			World->ServerTravel(FString("/Game/ThirdPerson/Maps/Lobby?listen"));
+		}
+	}
+	else
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(
+				-1,
+				15.0f,
+				FColor::Red,
+				FString(TEXT("Failed to create Session"))
+			);
+		}
+	}
+}
+
+void AMenuSystemCharacter::JoinGameSession()
+{
+	// find game sessions
+
+	if (!OnlineSessionInterface.IsValid())
+	{
+		return;
+	}
+
+	//Add Find SessionComplete delegate to the OnlineSessionInterface delegate list
+	OnlineSessionInterface->AddOnFindSessionsCompleteDelegate_Handle(FindSessionCompleteDelegate);
+	SessionSearch = MakeShareable(new FOnlineSessionSearch());
+	SessionSearch->MaxSearchResults = 10000; // set to a high number because as we are using the ID(480) for Spacewar, there's a big chance to find lots of sessions with this ID
+	SessionSearch->bIsLanQuery = false;
+	SessionSearch->QuerySettings.Set(SEARCH_PRESENCE, true, EOnlineComparisonOp::Equals); // make sure that every presence we find is using PRESENCE (bUsesPresence)
+
+	// Get a UniqueNetId to use in the FindSession below
+	const ULocalPlayer* LocalPlayer = GetWorld()->GetFirstLocalPlayerFromController();
+	// the last param SessionSearch in this case was a TSharedPointer, and the function FindSession takes a TSharedRef param, so we convert to TSharedRef by using SssionSearch.ToSharedRef
+	OnlineSessionInterface->FindSessions(*LocalPlayer->GetPreferredUniqueNetId(), SessionSearch.ToSharedRef());
+	
+}
+
+void AMenuSystemCharacter::OnFindSessionComplete(bool bWasSuccessful)
+{
+	if (!OnlineSessionInterface.IsValid()) return;
+
+	// iterate through the SearchResults
+	for (auto Result : SessionSearch->SearchResults)
+	{
+		FString Id = Result.GetSessionIdStr();
+		FString UserName = Result.Session.OwningUserName;
+
+		FString MatchType;
+		Result.Session.SessionSettings.Get(FName("MatchType"), MatchType);
+
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(
+				-1,
+				15.0f,
+				FColor::Yellow,
+				FString::Printf(TEXT("Id: %s, User: %s"), *Id, *UserName)
+			);
+		}
+
+		if (MatchType == FString("FreeforAll"))
+		{
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(
+					-1,
+					15.0f,
+					FColor::Orange,
+					FString::Printf(TEXT("Joining MatchType: %s"), *MatchType)
+				);
+			}
+			//Add Join SessionComplete delegate to the OnlineSessionInterface delegate list
+			OnlineSessionInterface->AddOnJoinSessionCompleteDelegate_Handle(JoinSessionCompleteDelegate);
+
+			// Get a UniqueNetId to use in the FindSession below
+			const ULocalPlayer* LocalPlayer = GetWorld()->GetFirstLocalPlayerFromController();
+			OnlineSessionInterface->JoinSession(*LocalPlayer->GetPreferredUniqueNetId(), NAME_GameSession, Result);
+		}
+	}
+}
+
+void AMenuSystemCharacter::OnJoinSessionComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result)
+{
+	if (!OnlineSessionInterface.IsValid()) return;
+	// Address declared in order to store the String from GetResolvedConnectString function below.
+	FString Address;
+	if (OnlineSessionInterface->GetResolvedConnectString(NAME_GameSession, Address))
+	{
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(
+				-1,
+				15.0f,
+				FColor::Yellow,
+				FString::Printf(TEXT("Connect String: %s"), *Address)
+			);
+		}
+
+		// get a reference to player controller through GameInstance
+		APlayerController* PlayerController = GetGameInstance()->GetFirstLocalPlayerController();
+
+		if (PlayerController)
+		{
+			// if playercontroller is valid, call client travel, to travel to the Lobby Map
+			PlayerController->ClientTravel(Address, ETravelType::TRAVEL_Absolute);
+		}
+	}
 }
 
 void AMenuSystemCharacter::TouchStarted(ETouchIndex::Type FingerIndex, FVector Location)
