@@ -6,6 +6,7 @@
 #include "Components/Button.h"
 #include "MultiplayerSessionsSubsystem.h"
 #include "OnlineSessionSettings.h"
+#include "OnlineSubsystem.h"
 
 
 void UMenu::MenuSetup(int32 NumberOfPublicConnections, FString TypeOfMatch)
@@ -115,15 +116,42 @@ void UMenu::OnCreateSession(bool bWasSuccessful)
 
 void UMenu::OnFindSessions(const TArray<FOnlineSessionSearchResult>& SessionResults, bool bWasSuccessful)
 {
-	if (MultiplayerSessionSubsystem)
+	if (MultiplayerSessionSubsystem == nullptr) return;
+
+	// iterate through SearchResults
+	for (auto Result : SessionResults)
 	{
-		MultiplayerSessionSubsystem->FindSessions(10000);
+		FString SettingValue;
+		Result.Session.SessionSettings.Get(FName("MatchType"), SettingValue);
+		if (SettingValue == MatchType)
+		{
+			MultiplayerSessionSubsystem->JoinSession(Result);
+			return;
+		}
 	}
 }
 
 void UMenu::OnJoinSession(EOnJoinSessionCompleteResult::Type Result)
 {
-
+	// pointer to OnlineSubsystem
+	// Store in the SessionInterface variable, interfaces from IOnlineSubsystem functionalities
+	// get a reference to player controller through GameInstance
+	// if playercontroller is valid, call client travel, to travel to the Lobby Map
+	IOnlineSubsystem* Subsystem = IOnlineSubsystem::Get();
+	if (Subsystem)
+	{
+		IOnlineSessionPtr SessionInterface = Subsystem->GetSessionInterface();
+		if (SessionInterface.IsValid())
+		{
+			FString Address;
+			SessionInterface->GetResolvedConnectString(NAME_GameSession, Address);
+			APlayerController* PlayerController = GetGameInstance()->GetFirstLocalPlayerController();
+			if (PlayerController)
+			{
+				PlayerController->ClientTravel(Address, ETravelType::TRAVEL_Absolute);
+			}
+		}
+	}
 }
 
 void UMenu::OnDestroySession(bool bWasSuccessful)
@@ -146,14 +174,9 @@ void UMenu::HostButtonClicked()
 
 void UMenu::JoinButtonClicked()
 {
-	if (GEngine)
+	if (MultiplayerSessionSubsystem)
 	{
-		GEngine->AddOnScreenDebugMessage(
-			-1,
-			15.f,
-			FColor::Yellow,
-			FString(TEXT("Join Button Clicked"))
-		);
+		MultiplayerSessionSubsystem->FindSessions(10000);
 	}
 }
 
